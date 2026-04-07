@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('./db');
+const { query, initDb } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 4174;
@@ -9,114 +9,83 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname));
 
 const resourceConfig = {
-  leads: {
-    table: 'leads',
-    idField: 'id',
-    required: ['name'],
-    fields: ['name', 'type', 'stage', 'region', 'potential_liquidity', 'confidence', 'expected_timing', 'owner', 'next_action', 'notes'],
-  },
-  tasks: {
-    table: 'launch_tasks',
-    idField: 'id',
-    required: ['task_name'],
-    fields: ['task_name', 'workstream', 'owner', 'status', 'priority', 'risk_level', 'due_date', 'notes'],
-  },
-  invites: {
-    table: 'invite_batches',
-    idField: 'id',
-    required: ['batch_name'],
-    fields: ['batch_name', 'source', 'max_uses', 'used_count', 'status', 'expires_at', 'notes'],
-  },
-  campaigns: {
-    table: 'campaigns',
-    idField: 'id',
-    required: ['name'],
-    fields: ['name', 'narrative', 'channels', 'owner', 'status', 'launch_date', 'notes'],
-  },
-  kols: {
-    table: 'kol_contacts',
-    idField: 'id',
-    required: ['name'],
-    fields: ['name', 'handle', 'platform', 'category', 'region', 'audience', 'contact_person', 'stage', 'rate_card', 'deliverable', 'publish_date', 'blockers', 'last_contact_at', 'next_action', 'notes'],
-  },
+  leads: { table: 'leads', required: ['name'], fields: ['name','type','stage','region','potential_liquidity','confidence','expected_timing','owner','next_action','notes'] },
+  tasks: { table: 'launch_tasks', required: ['task_name'], fields: ['task_name','workstream','owner','status','priority','risk_level','due_date','notes'] },
+  invites: { table: 'invite_batches', required: ['batch_name'], fields: ['batch_name','source','max_uses','used_count','status','expires_at','notes'] },
+  campaigns: { table: 'campaigns', required: ['name'], fields: ['name','narrative','channels','owner','status','launch_date','notes'] },
+  kols: { table: 'kol_contacts', required: ['name'], fields: ['name','handle','platform','category','region','audience','contact_person','stage','rate_card','deliverable','publish_date','blockers','last_contact_at','next_action','notes'] },
 };
-
-function list(table, orderBy = 'id DESC') {
-  return db.prepare(`SELECT * FROM ${table} ORDER BY ${orderBy}`).all();
-}
-
-function getOne(table, id) {
-  return db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
-}
 
 function pickFields(body, fields) {
   const out = {};
-  for (const field of fields) {
-    if (Object.prototype.hasOwnProperty.call(body, field)) out[field] = body[field];
-  }
+  for (const field of fields) if (Object.prototype.hasOwnProperty.call(body, field)) out[field] = body[field];
   return out;
 }
 
 function validateRequired(required, payload) {
-  const missing = required.filter((field) => !payload[field]);
-  return missing;
+  return required.filter((field) => !payload[field]);
 }
 
 function mountCrud(resourceName, config) {
   const { table, fields, required } = config;
 
-  app.get(`/api/${resourceName}`, (_req, res) => {
-    res.json(list(table));
+  app.get(`/api/${resourceName}`, async (_req, res) => {
+    const { rows } = await query(`SELECT * FROM ${table} ORDER BY id DESC`);
+    res.json(rows);
   });
 
-  app.get(`/api/${resourceName}/:id`, (req, res) => {
-    const row = getOne(table, req.params.id);
-    if (!row) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
-    res.json(row);
+  app.get(`/api/${resourceName}/:id`, async (req, res) => {
+    const { rows } = await query(`SELECT * FROM ${table} WHERE id = $1`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
+    res.json(rows[0]);
   });
 
-  app.post(`/api/${resourceName}`, (req, res) => {
+  app.post(`/api/${resourceName}`, async (req, res) => {
     const payload = pickFields(req.body, fields);
     const missing = validateRequired(required, payload);
     if (missing.length) return res.status(400).json({ error: `${missing.join(', ')} is required` });
-
-    const cols = [...Object.keys(payload), 'updated_at'];
-    const placeholders = cols.map((c) => (c === 'updated_at' ? 'CURRENT_TIMESTAMP' : `@${c}`)).join(', ');
-    const stmt = db.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`);
-    const result = stmt.run(payload);
-    res.json(getOne(table, result.lastInsertRowid));
+    const cols = Object.keys(payload);
+    const values = Object.values(payload);
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+    const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+    const { rows } = await query(sql, values);
+    res.json(rows[0]);
   });
 
-  app.put(`/api/${resourceName}/:id`, (req, res) => {
-    const existing = getOne(table, req.params.id);
-    if (!existing) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
-
+  app.put(`/api/${resourceName}/:id`, async (req, res) => {
     const payload = pickFields(req.body, fields);
     if (!Object.keys(payload).length) return res.status(400).json({ error: 'No fields to update' });
-
-    const assignments = Object.keys(payload).map((field) => `${field} = @${field}`);
-    assignments.push('updated_at = CURRENT_TIMESTAMP');
-    const stmt = db.prepare(`UPDATE ${table} SET ${assignments.join(', ')} WHERE id = @id`);
-    stmt.run({ id: req.params.id, ...payload });
-    res.json(getOne(table, req.params.id));
+    const sets = Object.keys(payload).map((field, i) => `${field} = $${i + 1}`);
+    const values = [...Object.values(payload), req.params.id];
+    const sql = `UPDATE ${table} SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${values.length} RETURNING *`;
+    const { rows } = await query(sql, values);
+    if (!rows.length) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
+    res.json(rows[0]);
   });
 
-  app.delete(`/api/${resourceName}/:id`, (req, res) => {
-    const existing = getOne(table, req.params.id);
-    if (!existing) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
-    db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(req.params.id);
-    res.json({ ok: true, id: Number(req.params.id) });
+  app.delete(`/api/${resourceName}/:id`, async (req, res) => {
+    const { rows } = await query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: `${resourceName.slice(0, -1)} not found` });
+    res.json({ ok: true, id: Number(rows[0].id) });
   });
 }
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'monetrix-manager', db: 'sqlite' });
+app.get('/api/health', async (_req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ ok: true, service: 'monetrix-manager', db: 'postgres' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
-for (const [resourceName, config] of Object.entries(resourceConfig)) {
-  mountCrud(resourceName, config);
-}
+for (const [resourceName, config] of Object.entries(resourceConfig)) mountCrud(resourceName, config);
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Monetrix manager listening on http://0.0.0.0:${PORT}`);
+initDb().then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Monetrix manager listening on http://0.0.0.0:${PORT}`);
+  });
+}).catch((err) => {
+  console.error('Failed to init DB', err);
+  process.exit(1);
 });
