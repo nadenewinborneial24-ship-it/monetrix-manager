@@ -4,6 +4,13 @@
     { "src": "server.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/server.js" }
+    { "src": "/api/(.*)", "dest": "/server.js" },
+    { "src": "/dashboard", "dest": "/pages/dashboard_updated.html" },
+    { "src": "/pipeline", "dest": "/pages/liquidity_pipeline_crm_updated.html" },
+    { "src": "/forecast", "dest": "/pages/capital_forecast.html" },
+    { "src": "/invite", "dest": "/pages/invite_tvl_control.html" },
+    { "src": "/social", "dest": "/pages/social_kol.html" },
+    { "src": "/launch", "dest": "/pages/launch_tracker_updated.html" },
+    { "src": "/", "dest": "/pages/dashboard_updated.html" }
   ]
 }
