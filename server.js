@@ -8,6 +8,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname));
 
+app.get('/', (_req, res) => {
+  res.sendFile(require('path').join(__dirname, 'index.html'));
+});
+
 const resourceConfig = {
   leads: { table: 'leads', required: ['name'], fields: ['name','type','stage','region','potential_liquidity','confidence','expected_timing','owner','next_action','notes'] },
   tasks: { table: 'launch_tasks', required: ['task_name'], fields: ['task_name','workstream','owner','status','priority','risk_level','due_date','notes'] },
