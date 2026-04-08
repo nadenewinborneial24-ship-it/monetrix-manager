@@ -1,13 +1,4 @@
 {
   "cleanUrls": true,
-  "trailingSlash": false,
-  "rewrites": [
-    { "source": "/", "destination": "/index.html" },
-    { "source": "/dashboard", "destination": "/dashboard.html" },
-    { "source": "/pipeline", "destination": "/pipeline.html" },
-    { "source": "/forecast", "destination": "/forecast.html" },
-    { "source": "/invite", "destination": "/invite.html" },
-    { "source": "/social", "destination": "/social.html" },
-    { "source": "/launch", "destination": "/launch.html" }
-  ]
+  "trailingSlash": false
 }
